@@ -23,7 +23,7 @@ def calc_drag_force(density_fluid, d_particle, dynamic_viscosity, v_apparent):
     
     cross_section = (math.pi / 4.0) * d_particle ** 2
    
-    return 0.5 * density_fluid * C_d * cross_section * v_mag * v_apparent
+    return 0.5 * density_fluid * C_d * cross_section * v_mag ** 2 * (v_apparent / v_mag)
 
 # electric force from a single plate on tower (assuming the tower is a plate)
 def calc_tower_electric_force(sigma, q, epsilon):
@@ -44,7 +44,7 @@ time_step = 0.001
 # research later, this is the first values I found
 v_particle = 15 * (10 ** -6) # idek what this is, I just saw it somewhere in the notes
 d_particle = 2.5 * 10 ** -6 # particle diameter (in meters I think, again this is from notes)
-A_particle = (math.pi / 4) * (d_particle / 2) ** 2 # assuming spherical particles
+A_particle = (math.pi / 4) * (d_particle) ** 2 # assuming spherical particles
 p_particle = 1500 # density kg/m^3
 m_particle = (math.pi / 6) * p_particle * d_particle ** 3 # particle mass (kg)
 q_particle = 3.2 * 10 ** -17 # particle charge (Coulombs)
@@ -53,8 +53,9 @@ q_particle = 3.2 * 10 ** -17 # particle charge (Coulombs)
 p_air = 1.194 # air density
 v_air = np.array([0, -0.5]) # air velocity
 g = 9.81 # gravity (m/s^2)
-concentration = 10 ** 6 # particles / m^3 c(t)
-pollution = time_step * (10 ** -6) # how much "concentration" gets added every time step
+PM_init = 17
+concentration = (PM_init / 1e9) / m_particle # particles / m^3 c(t)
+pollution = time_step / (((5 / 1e9) / 3600) / m_particle) # how much "concentration" gets added every time step
 cloud_height = 7 # total height of the cloud for electric field (H in m)
 
 # Tower
@@ -71,8 +72,6 @@ dynamic_viscosity = 1.84 * 10 ** -5
 gravity_force = np.array([0, -calc_gravity_force(p_particle, g, d_particle)])
 buoyant_force = np.array([0, calc_buoyant_force(p_air, g, d_particle)])
 
-
-
 def model(state, t):
     x, y, vx, vy, concentration = state # current state of particle
     distance = math.sqrt(x ** 2 + y ** 2)
@@ -80,7 +79,7 @@ def model(state, t):
     drag_force = calc_drag_force(p_air, d_particle, dynamic_viscosity, v_apparent)
     
     electric_tower_force = calc_tower_electric_force(sigma, q_particle, epsilon)
-    electric_cloud_force = calc_cloud_electric_force(cloud_height, distance, q_particle, concentration, epsilon)
+    electric_cloud_force = calc_cloud_electric_force(cloud_height, y, q_particle, concentration, epsilon)
     
     electric_force = np.array([electric_cloud_force - electric_tower_force, 0])
     
@@ -111,14 +110,16 @@ except: total_time = 30
 
 # ODE for predicting single particle movement in proximity to the tower
 # This can help determine how the tower affects certain particles and at what distances and stuff
-t = np.linspace(0, total_time, int(total_time / time_step))
+t = np.arange(0.0, total_time + time_step, time_step)
 if mode == 1:
     state = [x, y, vx, vy, concentration] # x, y, vx, vy
     solution = odeint(model, state, t)
     
     x = solution[:, 0]
     y = solution[:, 1]
-    print(x, y)
+    vx = solution[:, 2]
+    vy = solution[:, 3]
+    print(x, y, vx[-1], vy[-1])
     c = solution[:, 4]
     
     final_concentration = c[-1] * m_particle * 10 ** -9 # micro grams / m^3
@@ -143,7 +144,7 @@ elif mode == 2:
             y = solution[:, 1]
             c = solution[:, 4]
 
-            solutions.append(c[-1] * m_particle * 10 ** -9)
+            solutions.append(c[-1] * m_particle * 10 ** 9)
     print(f"Average Concentration: {sum(solutions) / len(solutions)}")
 else:
     print("Mode not available")
