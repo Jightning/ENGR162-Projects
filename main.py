@@ -55,7 +55,7 @@ v_air = np.array([0, -0.5]) # air velocity
 g = 9.81 # gravity (m/s^2)
 PM_init = 17
 concentration = (PM_init / 1e9) / m_particle # particles / m^3 c(t)
-pollution = time_step / (((5 / 1e9) / 3600) / m_particle) # how much "concentration" gets added every time step
+pollution = (((5 / 1e9) / 3600) / m_particle) # how much "concentration" gets added every time step
 cloud_height = 7 # total height of the cloud for electric field (H in m)
 
 # Tower
@@ -122,10 +122,10 @@ if mode == 1:
     print(x, y, vx[-1], vy[-1])
     c = solution[:, 4]
     
-    final_concentration = c[-1] * m_particle * 10 ** -9 # micro grams / m^3
+    final_concentration = c[-1] * m_particle * 1e9 # micro grams / m^3
     
-    print(f"Total Concentration after {total_time} seconds: {c[-1]}")
-    
+    print(f"Total Concentration after {total_time} seconds: {final_concentration}")
+
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
     axes[0].plot(x, y)
     axes[0].set_title("Position (m)")
