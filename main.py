@@ -59,13 +59,16 @@ pollution = (((5 / 1e9) / 3600) / m_particle) # how much "concentration" gets ad
 cloud_height = 7 # total height of the cloud for electric field (H in m)
 
 # Tower
-E_tower = 30000 # Electric Field Strength (V)
+E_tower = 500 # Electric Field Strength (V)
 h_tower = 3.5 # Effective Tower Height (meters)
 
 # Others
 epsilon = 8.854 * 10 ** -12 # vacuum permittivity C^2 / (N * m^2)
 sigma = 2.0 * epsilon * 300e3 # charge per m^2
 dynamic_viscosity = 1.84 * 10 ** -5
+
+# Util Constants
+AVG_RADIUS = 20 # radius to look at when doing averages 
 
 # vectors represented with the great numpy
 # 2D for now, tower is at (0, 0) - (x, y)
@@ -74,6 +77,7 @@ buoyant_force = np.array([0, calc_buoyant_force(p_air, g, d_particle)])
 
 def model(state, t):
     x, y, vx, vy, concentration = state # current state of particle
+
     distance = math.sqrt(x ** 2 + y ** 2)
     v_apparent = v_air - np.array([vx, vy])
     drag_force = calc_drag_force(p_air, d_particle, dynamic_viscosity, v_apparent)
@@ -108,6 +112,8 @@ except: vy = 0
 try: total_time = int(input("Time in Seconds: "))
 except: total_time = 30
 
+print(f"Initial Concentration: {concentration}")
+
 # ODE for predicting single particle movement in proximity to the tower
 # This can help determine how the tower affects certain particles and at what distances and stuff
 t = np.arange(0.0, total_time + time_step, time_step)
@@ -126,25 +132,34 @@ if mode == 1:
     
     print(f"Total Concentration after {total_time} seconds: {final_concentration}")
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    fig, axes = plt.subplots(1, 4, figsize=(13, 5))
     axes[0].plot(x, y)
     axes[0].set_title("Position (m)")
     
     axes[1].plot(t, c)
     axes[1].set_title("Concentration")
+
+    axes[2].plot(t, x)
+    axes[2].set_title("X vs Time")
+
+    axes[3].plot(t, y)
+    axes[3].set_title("Y vs Time")
     plt.show()
 elif mode == 2:
     solutions = []
-    for i in tqdm(range(-10, 10)):
-        for j in range(-10, 10):
-            state = [i, j, vx, vy, concentration] # x, y, vx, vy
+    for r in tqdm(range(0, AVG_RADIUS)):
+        for theta in np.arange(0, 2 * math.pi, 2 * math.pi / AVG_RADIUS):
+            x = r * math.cos(theta)
+            y = r * math.sin(theta)
+            state = [x, y, vx, vy, concentration] # x, y, vx, vy
             solution = odeint(model, state, t)
         
             x = solution[:, 0]
             y = solution[:, 1]
             c = solution[:, 4]
+            final_concentration = c[-1] * m_particle * 10 ** 9
 
-            solutions.append(c[-1] * m_particle * 10 ** 9)
+            solutions.append(final_concentration)
     print(f"Average Concentration: {sum(solutions) / len(solutions)}")
 else:
     print("Mode not available")
