@@ -136,7 +136,7 @@ if mode == 1:
     axes[0].plot(x, y)
     axes[0].set_title("Position (m)")
     
-    axes[1].plot(t, c)
+    axes[1].plot(t, c * m_particle * 10 ** 9)
     axes[1].set_title("Concentration")
 
     axes[2].plot(t, x)
