@@ -40,7 +40,7 @@ def calc_cloud_electric_force(plate_distance, cloud_height, q, PM_init, epsilon,
     return np.array([sign * magnitude, 0])
 
 # Constants
-time_step = 0.1
+time_step = 0.05
 rng = np.random.default_rng() # for randomizing stuff
 
 d_particle = 2.5e-6 # particle diameter (in meters I think, again this is from notes)
@@ -67,10 +67,10 @@ tower_radius = 1
 epsilon = 8.854e-12 # vacuum permittivity C^2 / (N * m^2)
 sigma = 2.0 * epsilon * 300e3 # charge per m^2
 dynamic_viscosity = 1.84e-5
+terminal_velocity = 0.00025
 
 # Util Constants
 AVG_RADIUS = 20 # radius to look at when doing averages 
-
 
 # Constant Forces
 gravity_force = calc_gravity_force(p_particle, g, d_particle)
@@ -105,53 +105,84 @@ def model(state, t):
 # This can help determine how the tower affects certain particles and at what distances and stuff
 
 # V2
-radius = float(input("Evaluation Radius (m) [Default 20]: ") or 20.0)
-total_time = 600
+sweep = False
+step = 1
+radius = float(input("Evaluation Radius (m) [Default 20] [-1 for sweep test]: ") or 20.0)
+effective_radius = -1
+if radius == -1: 
+    sweep = True
+    radii = 200
+    radius = 100
+else:
+    radius = int(radius)
+    radii = radius + 1
+
+total_time = 30 * 60
 num_samples = 50
-all_solutions = []
-capture_times = [] # all values where a particle got captured
 times = np.arange(0, total_time, time_step)
 
 print(f"Simulating {num_samples} particles with {pollution * 3600}ug/hr pollution...")
-for n in (range(num_samples)):
-    # Random point in polar coords with random velocity (:<)
-    r = radius * np.sqrt(np.random.uniform(0, 1))
-    angle = np.random.uniform(0, 2 * np.pi)
-    sx, sy = r * np.cos(angle), np.random.uniform(0, cloud_height)
-    
-    # ODE (main calculations)
-    v_air = rng.random(2) * 2 - 1 # random 2 values for air (from -1 to 1)
-    sol = odeint(model, [sx, sy, 0, 0], times)
-    all_solutions.append(sol)
-    
-    # Particles captured by the tower
-    cap_idx = np.where((np.abs(sol[:, 0]) < 0.15) & (sol[:, 1] <= h_tower))[0]
-    capture_times.append(times[cap_idx[0]] if len(cap_idx) > 0 else float('inf'))
+for rad in tqdm(range(radius, radii, step)):
+    all_solutions = []
+    capture_times = [] # all values where a particle got captured
 
-# Final Concentration Calculations
-concentration_history = []
-for t in times:
-    # TODO This seems to assume all points are eventually captured which although
-    # the graphs show it's correct, theoretically shouldn't be happening
-    still_floating = sum(1 for ct in capture_times if ct > t)
-    base_pm = (still_floating / num_samples) * PM_init
-    
-    new_pm = pollution * t
-    
-    concentration_history.append(base_pm + new_pm)
+    for n in (range(num_samples)):
+        # Random point in polar coords with random velocity (:<)
+        r = rad * np.sqrt(np.random.uniform(0, 1))
+        angle = np.random.uniform(0, 2 * np.pi)
+        sx, sy = rad * np.cos(angle), np.random.uniform(0, cloud_height)
+
+        # ODE (main calculations)
+        v_air = rng.random(2) * 2 * terminal_velocity - terminal_velocity # random 2 values for air (from -terminal to terminal)
+        sol = odeint(model, [sx, sy, 0, 0], times)
+        all_solutions.append(sol)
+
+        # Particles captured by the tower
+        cap_idx = np.where((np.abs(sol[:, 0]) < 0.15) & (sol[:, 1] <= h_tower))[0]
+        capture_times.append(times[cap_idx[0]] if len(cap_idx) > 0 else float('inf'))
+
+    num_free = num_samples - sum(1 for ct in capture_times if ct != float('inf'))
+    # Final Concentration Calculations
+    concentration_history = []
+    final_concentration = -1
+    for t in times: 
+        # Counts number of particles yet to be captured
+        still_floating = sum(1 for ct in capture_times if ct != float('inf') and ct > t)
+        # Total % particle not captured at this time, times PM
+        base_pm = ((still_floating + num_free) / num_samples) * PM_init
+
+        new_pm = pollution * t
+
+        if (still_floating <= 0 and final_concentration == -1):
+            final_concentration = base_pm + new_pm
+
+        concentration_history.append(base_pm + new_pm)
+
+    effectiveness = (sum(1 for t in capture_times if t != float('inf')) / num_samples)
+    if effective_radius == -1 and final_concentration - PM_init > 0:
+        effective_radius = rad - step
+        break
+    # if final_concentration > 5 and effective_radius == -1:
+    #     effective_radius = rad - step
+    #     break
 
 # Results
-print(f"\nFinal PM2.5 Level: {concentration_history[-1]:.2f} µg/m³")
-print(f"Net Change: {concentration_history[-1] - PM_init:.2f} µg/m³")
+print(f"\nFinal PM2.5 Level: {final_concentration:.2f} µg/m³")
+print(f"Net Change: {final_concentration - PM_init:.2f} µg/m³")
 # TODO There's a bunch of values we can calculate with the data, like this (tho it's 100 with our current setup)
-print(f"Tower Effectiveness: {(sum(1 for t in capture_times if t != float('inf')) / num_samples) * 100}%") # messy but whatever
+print(f"Tower Effectiveness: {effectiveness * 100:.2f}%") # messy but whatever
+volume =  ((4/3) * math.pi * radius ** 3) * particle_concentration * ((4/3) * math.pi * (d_particle / 2) ** 3) * effectiveness
+print(f"Volume Absorbed: {volume * 1e8:.2f} (cm)^3")
+
+if sweep:
+    print(f"Effective Radius: {effective_radius}")
 
 # Plotting
-fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+fig, axes = plt.subplots(1, 2)
 
 # Trajectory
 for s in all_solutions:
-    axes[0, 0].plot(s[:, 0], s[:, 1], alpha=0.2)
+    axes[0].plot(s[:, 0], s[:, 1], alpha=0.2)
     # Arrow pointing towards the travel direction of the particle
     end_x, end_y = s[-1, 0], s[-1, 1]
     dist = math.hypot(end_x, end_y)
@@ -161,7 +192,7 @@ for s in all_solutions:
         # Tail is a step away from the head in the direction away from the tower
         tail_x = end_x - ux * arrow_len
         tail_y = end_y - uy * arrow_len
-        axes[0, 0].annotate(
+        axes[0].annotate(
             '',
             xy=(end_x, end_y),    # arrow head at particle endpoint
             xytext=(tail_x, tail_y),
@@ -171,25 +202,16 @@ for s in all_solutions:
                 mutation_scale=15     # Adjust arrow head size
             ),
         )
-axes[0,0].set_title("Trajectories")
 
+axes[0].set_title("Trajectories")
 # Concentration
-axes[0,1].plot(times, concentration_history, color='green', label='Total PM2.5')
-axes[0,1].axhline(y=PM_init, color='red', linestyle='--', label='Start Level')
-axes[0,1].set_title(f"Concentration (Includes + {pollution * 3600}µg/hr Pollution)")
-axes[0,1].legend()
-
-# X vs Time
-for s in all_solutions: axes[1,0].plot(times, s[:, 0], alpha=0.2)
-axes[1,0].set_title("X-Position vs Time")
-
-# Y vs Time
-for s in all_solutions: axes[1,1].plot(times, s[:, 1], alpha=0.2)
-axes[1,1].set_title("Y-Position vs Time")
+axes[1].plot(times, concentration_history, color='green', label='Total PM2.5')
+axes[1].axhline(y=PM_init, color='red', linestyle='--', label='Start Level')
+axes[1].set_title(f"Concentration (Includes + {pollution * 3600}µg/hr Pollution)")
+axes[1].legend()
 
 plt.tight_layout()
 plt.show()
-
 
 # V1 (old calculations for later possible reuse)
 # Inputs
