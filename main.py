@@ -40,7 +40,9 @@ def calc_cloud_electric_force(plate_distance, cloud_height, q, PM_init, epsilon,
     return np.array([sign * magnitude, 0])
 
 # Constants
-time_step = 0.05
+time_step = 0.5
+total_time = 3600 * 24
+num_samples = 500
 rng = np.random.default_rng() # for randomizing stuff
 
 d_particle = 2.5e-6 # particle diameter (in meters I think, again this is from notes)
@@ -50,7 +52,7 @@ m_particle = (math.pi / 6) * p_particle * (d_particle ** 3) # particle mass (kg)
 q_particle = 3.2e-17 # particle charge (Coulombs)
 
 # Environment
-p_air = 1.194 # air density
+p_air = 1.194 # air density kg/m^3
 v_air = np.array([0, 0]) # air velocity
 g = 9.81 # gravity (m/s^2)
 PM_init = 17 # ug / m^3
@@ -111,14 +113,12 @@ radius = float(input("Evaluation Radius (m) [Default 20] [-1 for sweep test]: ")
 effective_radius = -1
 if radius == -1: 
     sweep = True
-    radii = 200
-    radius = 100
+    radii = 100
+    radius = 50
 else:
     radius = int(radius)
     radii = radius + 1
 
-total_time = 30 * 60
-num_samples = 50
 times = np.arange(0, total_time, time_step)
 
 print(f"Simulating {num_samples} particles with {pollution * 3600}ug/hr pollution...")
@@ -138,14 +138,14 @@ for rad in tqdm(range(radius, radii, step)):
         all_solutions.append(sol)
 
         # Particles captured by the tower
-        cap_idx = np.where((np.abs(sol[:, 0]) < 0.15) & (sol[:, 1] <= h_tower))[0]
+        cap_idx = np.where((np.abs(sol[:, 0]) < tower_radius) & (sol[:, 1] <= h_tower))[0]
         capture_times.append(times[cap_idx[0]] if len(cap_idx) > 0 else float('inf'))
 
     num_free = num_samples - sum(1 for ct in capture_times if ct != float('inf'))
     # Final Concentration Calculations
     concentration_history = []
     final_concentration = -1
-    for t in times: 
+    for idx, t in enumerate(times): 
         # Counts number of particles yet to be captured
         still_floating = sum(1 for ct in capture_times if ct != float('inf') and ct > t)
         # Total % particle not captured at this time, times PM
@@ -155,24 +155,28 @@ for rad in tqdm(range(radius, radii, step)):
 
         if (still_floating <= 0 and final_concentration == -1):
             final_concentration = base_pm + new_pm
+            break
 
         concentration_history.append(base_pm + new_pm)
 
     effectiveness = (sum(1 for t in capture_times if t != float('inf')) / num_samples)
-    if effective_radius == -1 and final_concentration - PM_init > 0:
-        effective_radius = rad - step
-        break
-    # if final_concentration > 5 and effective_radius == -1:
+    # if effective_radius == -1 and final_concentration - PM_init > 0:
     #     effective_radius = rad - step
     #     break
+    if final_concentration > 5 and effective_radius == -1:
+        effective_radius = rad - step
+        break
 
 # Results
 print(f"\nFinal PM2.5 Level: {final_concentration:.2f} µg/m³")
 print(f"Net Change: {final_concentration - PM_init:.2f} µg/m³")
 # TODO There's a bunch of values we can calculate with the data, like this (tho it's 100 with our current setup)
 print(f"Tower Effectiveness: {effectiveness * 100:.2f}%") # messy but whatever
-volume =  ((4/3) * math.pi * radius ** 3) * particle_concentration * ((4/3) * math.pi * (d_particle / 2) ** 3) * effectiveness
-print(f"Volume Absorbed: {volume * 1e8:.2f} (cm)^3")
+volume = ((4/3) * math.pi * radius ** 3) * particle_concentration * ((4/3) * math.pi * (d_particle / 2) ** 3) * effectiveness
+ratio = (PM_init * 1e-6) / (p_air * 1e3)
+volumetric_flow = volume + volume / ratio
+print(f"Smog Volume Absorbed: {volume} (cm)^3")
+print(f"Volumetric Flow: {volume * 100 / total_time} (m)^3/s")
 
 if sweep:
     print(f"Effective Radius: {effective_radius}")
@@ -205,8 +209,9 @@ for s in all_solutions:
 
 axes[0].set_title("Trajectories")
 # Concentration
-axes[1].plot(times, concentration_history, color='green', label='Total PM2.5')
+axes[1].plot(times[:idx], concentration_history, color='green', label='Total PM2.5')
 axes[1].axhline(y=PM_init, color='red', linestyle='--', label='Start Level')
+axes[1].axhline(y=5, color='red', linestyle='--', label='Start Level')
 axes[1].set_title(f"Concentration (Includes + {pollution * 3600}µg/hr Pollution)")
 axes[1].legend()
 
