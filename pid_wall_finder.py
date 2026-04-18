@@ -19,6 +19,12 @@ DIST_MAX = 25 # Max distance before wall isn't considered significant
 TURN_SLOW_THRESHOLD = 8 # How many degrees before target to start slow turning
 GYRO_BIAS = 0.0 # Gets set later, for gyro error correction
 
+# PID variables
+MOTOR_CMD_MAX = 80
+Kp=1.6
+Ki=0.01
+Kd=0.12
+
 def stop():
     motorL.stop()
     motorR.stop()
@@ -51,45 +57,53 @@ def calibrate_gyro(samples=200):
         gx, gy, gz = imu.getGyro()
         s += gz
         time.sleep(0.01)
-
+        
     print("Done!\n")
     return s / samples
 
+# Theoretical pid implementation
+def turn_degrees_pid(deg, clockwise=True, tolerance=2.0, timeout=5.0):
+    target = float(deg) if clockwise else -float(deg)
+    prev_error = target
+    heading = 0.0
+    integral = 0.0
 
-def turn_degrees(turn_func, degrees=90.0, speed=SPEED, tolerance=2.0):
-    total = 0.0
     prev_time = time.time()
+    start_time = prev_time
 
-    turn_func(speed)
-
-    # Main turn
-    while total < (degrees - tolerance):
-        # Having it slow down towards the end to get more precise
-        if total > degrees - tolerance - TURN_SLOW_THRESHOLD:
-            turn_func(SLOW_SPEED)
-
-        # Change in time
+    while True:
         cur_time = time.time()
         dt = cur_time - prev_time
         prev_time = cur_time
 
-        # Update rotation
         gx, gy, gz = imu.getGyro()
-        total += abs(gz - GYRO_BIAS) * dt
-        time.sleep(0.005)
+        heading += (gz - GYRO_BIAS) * dt
+
+        # Error calculations
+        error = target - heading
+        integral += error * dt
+        derivative = (error - prev_error) / dt if dt > 0 else 0.0
+        prev_error = error
+
+        adjustment = Kp * error + Ki * integral + Kd * derivative
+
+        # Clamp to ensure we don't go overboard lol
+        new_speed = int(min(MOTOR_CMD_MAX, abs(adjustment)))
+        # Turn based on command
+        if adjustment >= 0:
+            turn_right(new_speed)
+        else:
+            turn_left(new_speed)
+
+        # Exit conditions
+        if abs(error) <= tolerance:
+            break
+        if time.time() - start_time > timeout:
+            break
+
+        time.sleep(0.01)
 
     stop()
-
-    # Accounting for overshoot I LOVE RECURSION YESSIR
-    # TODO I'd be shocked if this doesn't cause issues
-    # Just comment out if too weird lol
-    overshoot = abs(total - degrees)
-    if overshoot > tolerance:
-        # hacky but might work
-        # basically passing a lambda that reverses the intended direction
-        # This might slow down with a lotta recursion but with a high enough tolerance it
-        # shouldn't happen, which i'm forcing by having it gradually increase
-        turn_degrees(lambda x: turn_func(-x), degrees=overshoot, tolerance=tolerance*1.1)
 
 # TODO set this to 0 if there are issues
 GYRO_BIAS = calibrate_gyro()
@@ -102,15 +116,16 @@ try:
 
     start()
     while True:
-        front_dist = sensor_front.getDist
-        right_dist = sensor_right.getDist
+        front_dist = sensor_front.getDist()
+        right_dist = sensor_right.getDist()
 
         # Task 1
         if right_dist > DIST_MAX: # default right turn if possible
-            turn_degrees(turn_right)
+            turn_degrees_pid(90.0, clockwise=True)
 
         elif front_dist < DIST_MAX: # turn left otherwise
-            turn_degrees(turn_left)
+            turn_degrees_pid(90.0, clockwise=False)
+
 
         time.sleep(0.01)
 except KeyboardInterrupt:

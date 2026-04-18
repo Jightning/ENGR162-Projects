@@ -9,15 +9,14 @@ sensor_front = UltrasonicSensor(9)
 sensor_right = UltrasonicSensor(18)
 imu = IMUSensor()
 
-# Initial variables
+# initial variables
 SPEED = 20 # Base speed of the robot
 SLOW_SPEED = 5
-
 DIST_MIN = 15 # Distance considered too close in cm
 DIST_MAX = 25 # Max distance before wall isn't considered significant
 
-TURN_SLOW_THRESHOLD = 8 # How many degrees before target to start slow turning
-GYRO_BIAS = 0.0 # Gets set later, for gyro error correction
+TURN_SLOW_THRESHOLD = 8
+CELL_TRAVEL_TIME = 1.5
 
 def stop():
     motorL.stop()
@@ -41,21 +40,6 @@ def turn_left(speed=SPEED):
     startL(-speed)
     startR(speed)
 
-# Initial gyro calibration, basically running gyro while stationary
-# and tracking unwanted movement
-def calibrate_gyro(samples=200):
-    s = 0.0
-    print(f"Calibrating gyro... Should take {0.01 * samples} seconds")
-    # TODO Add tqdm if the pi allows it as an import PLEASEEEEE
-    for _ in range(samples):
-        gx, gy, gz = imu.getGyro()
-        s += gz
-        time.sleep(0.01)
-
-    print("Done!\n")
-    return s / samples
-
-
 def turn_degrees(turn_func, degrees=90.0, speed=SPEED, tolerance=2.0):
     total = 0.0
     prev_time = time.time()
@@ -75,7 +59,7 @@ def turn_degrees(turn_func, degrees=90.0, speed=SPEED, tolerance=2.0):
 
         # Update rotation
         gx, gy, gz = imu.getGyro()
-        total += abs(gz - GYRO_BIAS) * dt
+        total += abs(gz) * dt
         time.sleep(0.005)
 
     stop()
@@ -91,8 +75,11 @@ def turn_degrees(turn_func, degrees=90.0, speed=SPEED, tolerance=2.0):
         # shouldn't happen, which i'm forcing by having it gradually increase
         turn_degrees(lambda x: turn_func(-x), degrees=overshoot, tolerance=tolerance*1.1)
 
-# TODO set this to 0 if there are issues
-GYRO_BIAS = calibrate_gyro()
+mapping = {(0, 0): }
+x = 0
+y = 0
+direction = 0
+directions = ['N', 'E', 'S', 'W']
 
 try:
     # Task 2
