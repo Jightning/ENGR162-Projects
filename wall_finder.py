@@ -4,14 +4,19 @@ import time
 
 motorL = Motor('D')
 motorR = Motor('A')
-sensor_front = UltrasonicSensor('6')
-sensor_right = UltrasonicSensor('2')
+# BUG TODO These numbers are prolly wrong
+sensor_front = UltrasonicSensor(9)
+sensor_right = UltrasonicSensor(18)
 imu = IMUSensor()
 
-# intial variables
-SPEED = 100 # Base speed of the robot
-DIST_MIN = 5 # Distance considered too close in cm
-DIST_MAX = 10 # Max distance before wall isn't considered significant
+# initial variables
+SPEED = 20 # Base speed of the robot
+SLOW_SPEED = 5
+DIST_MIN = 15 # Distance considered too close in cm
+DIST_MAX = 25 # Max distance before wall isn't considered significant
+
+TURN_SLOW_THRESHOLD = 8
+CELL_TRAVEL_TIME = 1.5
 
 def stop():
     motorL.stop()
@@ -35,56 +40,63 @@ def turn_left(speed=SPEED):
     startL(-speed)
     startR(speed)
 
-def turn_90_degrees(turn_func, tolerance=2):
-    turn = 0.0
+def turn_degrees(turn_func, degrees=90.0, speed=SPEED, tolerance=2.0):
+    total = 0.0
     prev_time = time.time()
 
-    turn_func()
+    turn_func(speed)
 
-    while abs(turn) < abs(turn) - tolerance:
+    # Main turn
+    while total < (degrees - tolerance):
+        # Having it slow down towards the end to get more precise
+        if total > degrees - tolerance - TURN_SLOW_THRESHOLD:
+            turn_func(SLOW_SPEED)
+
+        # Change in time
         cur_time = time.time()
         dt = cur_time - prev_time
-        prev_time = time.time()
+        prev_time = cur_time
 
+        # Update rotation
         gx, gy, gz = imu.getGyro()
-        turn += abs(gz) * dt
+        total += abs(gz) * dt
+        time.sleep(0.005)
 
+    stop()
 
-def dynamic_turn(speed=SPEED):
-    try:
-        while True:
-            front_dist = sensor_front.getDist()
-            right_dist = sensor_right.getDist()
-
-            if front_dist > DIST_MAX or right_dist > DIST_MAX:
-                start(speed)
-                return
-            else:
-                if right_dist < DIST_MAX:
-                    startL(speed/4)
-                else:
-                    startR(speed/4)
-    except KeyboardInterrupt:
-        stop()
-        return
-
+    # Accounting for overshoot I LOVE RECURSION YESSIR
+    # TODO I'd be shocked if this doesn't cause issues
+    # Just comment out if too weird lol
+    overshoot = abs(total - degrees)
+    if overshoot > tolerance:
+        # hacky but might work
+        # basically passing a lambda that reverses the intended direction
+        # This might slow down with a lotta recursion but with a high enough tolerance it
+        # shouldn't happen, which i'm forcing by having it gradually increase
+        turn_degrees(lambda x: turn_func(-x), degrees=overshoot, tolerance=tolerance*1.1)
 
 prev_time = time.time()
 turn = 0
 
 try:
+    # Task 2
+    # Uncomment 2 lines below, modify degrees and turn func
+    # turn_degrees(turn_right, degrees=90.0)
+    # return
+
     start()
     while True:
-        front_dist = sensor_front.getDist()
-        right_dist = sensor_right.getDist()
+        front_dist = sensor_front.getDist
+        right_dist = sensor_right.getDist
 
-        if front_dist > DIST_MAX:
+        # Task 1
+        if front_dist < DIST_MIN:
             if right_dist < DIST_MAX:
-                turn_90_degrees(turn_right(SPEED))
+                turn_degrees(turn_left)
             else:
-                turn_90_degrees(turn_left(SPEED))
+                turn_degrees(turn_right)
 
-        time.sleep(2)
+        time.sleep(0.01)
 except KeyboardInterrupt:
     stop()
     print("Code doth cease")
