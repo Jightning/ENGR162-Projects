@@ -70,38 +70,42 @@ def turn_degrees_pid(deg, clockwise=True, tolerance=2.0, timeout=5.0):
 
     prev_time = time.time()
     start_time = prev_time
+    
+    try:
+        while True:
+            cur_time = time.time()
+            dt = cur_time - prev_time
+            prev_time = cur_time
 
-    while True:
-        cur_time = time.time()
-        dt = cur_time - prev_time
-        prev_time = cur_time
+            gx, gy, gz = imu.getGyro()
+            total += (gz - GYRO_BIAS) * dt
 
-        gx, gy, gz = imu.getGyro()
-        total += (gz - GYRO_BIAS) * dt
+            # Error calculations
+            error = target - total
+            integral += error * dt
+            derivative = (error - prev_error) / max(dt, 1e-4)
+            prev_error = error
 
-        # Error calculations
-        error = target - total
-        integral += error * dt
-        derivative = (error - prev_error) / dt if dt > 0 else 0.0
-        prev_error = error
+            adjustment = Kp * error + Ki * integral + Kd * derivative
 
-        adjustment = Kp * error + Ki * integral + Kd * derivative
+            # Clamp to ensure we don't go overboard lol
+            new_speed = int(min(MOTOR_CMD_MAX, abs(adjustment)))
+            # Turn based on adjustment
+            if adjustment >= 0:
+                turn_right(new_speed)
+            else:
+                turn_left(new_speed)
 
-        # Clamp to ensure we don't go overboard lol
-        new_speed = int(min(MOTOR_CMD_MAX, abs(adjustment)))
-        # Turn based on adjustment
-        if adjustment >= 0:
-            turn_right(new_speed)
-        else:
-            turn_left(new_speed)
+            # Exit conditions
+            if abs(error) <= tolerance:
+                break
+            if time.time() - start_time > timeout:
+                break
 
-        # Exit conditions
-        if abs(error) <= tolerance:
-            break
-        if time.time() - start_time > timeout:
-            break
-
-        time.sleep(0.01)
+            time.sleep(0.01)
+    except KeyboardInterrupt:
+        stop()
+        return
 
     stop()
 

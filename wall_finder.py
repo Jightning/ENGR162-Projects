@@ -64,22 +64,25 @@ def turn_degrees(turn_func, degrees=90.0, speed=SPEED, tolerance=2.0):
     prev_time = time.time()
 
     turn_func(speed)
+    try:
+        # Main turn
+        while total < (degrees - tolerance):
+            # Having it slow down towards the end to get more precise
+            if total > degrees - tolerance - TURN_SLOW_THRESHOLD:
+                turn_func(SLOW_SPEED)
 
-    # Main turn
-    while total < (degrees - tolerance):
-        # Having it slow down towards the end to get more precise
-        if total > degrees - tolerance - TURN_SLOW_THRESHOLD:
-            turn_func(SLOW_SPEED)
+            # Change in time
+            cur_time = time.time()
+            dt = cur_time - prev_time
+            prev_time = cur_time
 
-        # Change in time
-        cur_time = time.time()
-        dt = cur_time - prev_time
-        prev_time = cur_time
-
-        # Update rotation
-        gx, gy, gz = imu.getGyro()
-        total += abs(gz - GYRO_BIAS) * dt
-        time.sleep(0.005)
+            # Update rotation
+            gx, gy, gz = imu.getGyro()
+            total += abs(gz - GYRO_BIAS) * dt
+            time.sleep(0.005)
+    except KeyboardInterrupt:
+        stop()
+        return
 
     stop()
 
