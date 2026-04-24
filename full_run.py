@@ -1,7 +1,8 @@
 from buildhat import Motor
-from basehat import IMUSensor, UltrasonicSensor
+from basehat import IMUSensor, UltrasonicSensor, IRSensor
 import time
 import json
+import math
 
 try:
     from tqdm import tqdm
@@ -19,24 +20,30 @@ cargoMotor = Motor('A')
 sensor_front = UltrasonicSensor(26)
 sensor_right = UltrasonicSensor(18)
 sensor_left = UltrasonicSensor(16)
-imu = IMUSensor()
+IR = IRSensor(4, 5)
+IMU = IMUSensor()
 
-JSON_LOG = True # TODO save path to a json, set to false if it errors
-CALIBRATE = True # TODO Calibrate gyro, set to false if it causes issues
+JSON_LOG = True #  save path to a json, set to false if it errors
+CALIBRATE = True # Calibrate gyro, set to false if it causes issues
+
+# Testing variables (set to false during actual run)
 TEST = False # Just log sensor distance without moving
+TIME_BASED = True # Run for only a set amount of time
 
 # initial variables
 SPEED = 20 # Base speed of the robot
 SLOW_SPEED = 5
 CELL_DIST = 5 # Cell distance
 
-# TODO These need hella testing, especially target dist (Disable if too annoying)
 DIST_MIN = 7 # Distance considered too close in cm
 DIST_MAX = 30 # Max distance before wall isn't considered significant
 TARGET_DIST = 12.2 # Target distance to stay from wall (dist from right sensor to right wall) (try to make slightly smaller in order to keep more right)
 
 TURN_SLOW_THRESHOLD = 8 # How many degrees before target to start slow turning
 GYRO_BIAS = 0.0 # Gets set later, for gyro error correction
+
+MAGNET_SOURCE_MAGNITUDE = 100 # Min magnitude of a magnetic source in uT
+HEAT_SOURCE_MAGNITUDE = 5 # Min magnitude of a heat source in W
 
 # PID variables
 MOTOR_CMD_MAX = 22.5
@@ -91,7 +98,7 @@ def calibrate_gyro(samples=200):
     print(f"Calibrating gyro... Should take {0.01 * samples:.2f} seconds")
     
     for _ in tqdm(range(samples), desc="Calibrating", ascii=True):
-        gx, gy, gz = imu.getGyro()
+        gx, gy, gz = IMU.getGyro()
         s += gz
         time.sleep(0.01)
         
@@ -114,7 +121,7 @@ def turn_degrees_pid(deg=90.0, clockwise=True, tolerance=3, timeout=5.0):
             dt = cur_time - prev_time
             prev_time = cur_time
 
-            gx, gy, gz = imu.getGyro()
+            gx, gy, gz = IMU.getGyro()
             total += (gz - GYRO_BIAS) * dt
 
             error = total - target
@@ -149,11 +156,13 @@ def turn_degrees_pid(deg=90.0, clockwise=True, tolerance=3, timeout=5.0):
     
     stop()
 
-def log(turned=False):
+def log(turned=False, heat_magnitude=0.0, magnetic_magnitude=0.0):
     path.append({
         "pos": (x, y),
         "dir": directions[direction],
-        "turned": turned
+        "turned": turned,
+        "heat_source": abs(heat_magnitude) >= HEAT_SOURCE_MAGNITUDE,
+        "magnetic_source": abs(magnet_magnitude) >= MAGNET_SOURCE_MAGNITUDE
     })
     # print(f"({x}, {y}) going {directions[direction]}")
  
@@ -180,11 +189,11 @@ def move_one_cell():
             dt = cur_time - prev_time
             prev_time = cur_time 
 
-            ax, ay, az = imu.getAccel()
+            ax, ay, az = IMU.getAccel()
             vx, vy, vz = vx + ax * dt, vy + ay * dt, vz + az * dt
             x, y, z = x + vx * dt, y + vy * dt, z + vz * dt
 
-            # Wall
+            # Reached distance or wall
             if  abs(y) >= CELL_DIST or front_dist < DIST_MIN:
                 break
 
@@ -235,41 +244,50 @@ direction = 0 # initial facing directions (north)
 directions = ['N', 'E', 'S', 'W']
 
 cur_time = time.time()
+
 if TEST:
     while True:
         front_dist = get_safe_dist(sensor_front)
         right_dist = get_safe_dist(sensor_right)
         left_dist = get_safe_dist(sensor_left)
-        print(front_dist, right_dist, left_dist)
 
-while time.time() - cur_time < 10:
+        mag_x, mag_y, mag_z = IMU.getMag()
+        mag_x, mag_y = -mag_x, -mag_y 
+
+        print(f"Front: {front_dist:.2f} Right: {right_dist:.2f} Left: {left_dist:.2f} Mag X: {mag_x:.2f} Mag Y: {mag_y:.2f} Mag Z: {mag_z:.2f}")
+
+while time.time() - cur_time < 10 or not TIME_BASED:
     try:
         front_dist = get_safe_dist(sensor_front)
         right_dist = get_safe_dist(sensor_right)
         left_dist = get_safe_dist(sensor_left)
         
-        mag_x, mag_y, mag_z = IMU.getMag()
+        # Magnetic/Heat source calculations
+        mag_x, mag_y, mag_z = IMU.getMag() # Magnet
         mag_x, mag_y = -mag_x, -mag_y # IMU is flipped on the robot, so just flipping the values for clarity (+x is right, +y is forward)
+        magnet_magnitude = math.sqrt(mag_x**2 + mag_y**2 + mag_z**2)
+        ir_left, ir_right = IR.value1, IR.value2 # Heat
+        ir_avg = (ir_left + ir_right) / 2.0
 
         if right_dist > DIST_MAX: # Turn right if clear
             stop()
-            print("Turning right")
+            print("Turning Right")
             turn_degrees_pid(clockwise=True)
           
             direction = (direction + 1) % 4
-            log(turned=True)
+            log(turned=True, heat_magnitude=ir_avg, magnetic_magnitude=magnet_magnitude)
         elif front_dist < DIST_MIN: # Turn left if unable to go forward or turn right
             stop()
-            print("Turning Left", front_dist, right_dist)
+            print("Turning Left")
             turn_degrees_pid(clockwise=False)
 
-            direction = (direction + 1) % 4
-            log(turned=True)
+            direction = (direction - 1) % 4
+            log(turned=True, heat_magnitude=ir_avg, magnetic_magnitude=magnet_magnitude)
         else: # Travel one cell forward if clear
             print("Onward")
             move_one_cell() # TODO Comment this and uncomment bottom two lines if there are issues
             update_coordinates()
-            log()
+            log(heat_magnitude=ir_avg, magnetic_magnitude=magnet_magnitude)
 
         time.sleep(0.01)
     except KeyboardInterrupt:
