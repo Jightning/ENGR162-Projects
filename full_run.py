@@ -53,8 +53,8 @@ Kp_turn = 5
 Ki_turn = 0.01
 Kd_turn = 0.06
 # Moving
-Kp_move = 2.5
-Ki_move = 0.01
+Kp_move = 2
+Ki_move = 0.02
 Kd_move = 0.15
 
 
@@ -162,7 +162,7 @@ def log(turned=False, heat_magnitude=0.0, magnetic_magnitude=0.0):
         "dir": directions[direction],
         "turned": turned,
         "heat_source": abs(heat_magnitude) >= HEAT_SOURCE_MAGNITUDE,
-        "magnetic_source": abs(magnet_magnitude) >= MAGNET_SOURCE_MAGNITUDE
+        "magnetic_source": abs(magnetic_magnitude) >= MAGNET_SOURCE_MAGNITUDE
     })
     # print(f"({x}, {y}) going {directions[direction]}")
  
@@ -174,27 +174,29 @@ def update_coordinates():
     elif direction == 3: x -= 1 # West
 
 def move_one_cell():
+    prev_error = get_safe_dist(sensor_right) - TARGET_DIST
     prev_time = time.time()
-    vx, vy, vz, x, y, z = 0, 0, 0, 0, 0, 0
-    prev_error = 0
     integral = 0.0
+    vy, y = 0, 0
 
     try:
         while True:
             front_dist = get_safe_dist(sensor_front)
-            right_dist = get_safe_dist(sensor_right)
-            left_dist = get_safe_dist(sensor_left)
+            right_dist = sensor_right.getDist
+            left_dist = sensor_left.getDist
+            if right_dist is None or left_dist is None:
+                continue
 
             cur_time = time.time()
             dt = cur_time - prev_time
             prev_time = cur_time 
 
-            ax, ay, az = IMU.getAccel()
-            vx, vy, vz = vx + ax * dt, vy + ay * dt, vz + az * dt
-            x, y, z = x + vx * dt, y + vy * dt, z + vz * dt
+            _, ay, _ = IMU.getAccel()
+            vy = vy + ay * dt
+            y = y + vy * dt
 
             # Reached distance or wall
-            if  abs(y) >= CELL_DIST or front_dist < DIST_MIN:
+            if abs(y) >= CELL_DIST or front_dist < DIST_MIN:
                 break
 
             # No wall on the right/left, just drive straight
@@ -207,17 +209,17 @@ def move_one_cell():
                 #print(error, right_dist)
 
                 integral += error * dt
-                integral = max(min(integral, 50.0), -50) # anti-windup cap
+                integral = max(min(integral, 50.0), -50.0)
 
                 derivative = (error - prev_error) / max(dt, 1e-4) # using last error rather than dt formula since error could reset to 0
+                derivative = max(min(derivative, 10.0), -10.0)
                 prev_error = error
 
                 adjustment = (Kp_move * error) + (Kd_move * derivative) + (Ki_move * integral)
-                adjustment = max(min(adjustment, MOTOR_CMD_MAX + 10), -MOTOR_CMD_MAX - 10)
+                adjustment = max(min(adjustment, SPEED), -SPEED)
                 #print("to ", adjustment)
                 
                 # positive adj if turning left, negative if turning right
-                # TODO turning here is slightly different since its geared towards moving forward
                 startL(SPEED + adjustment)
                 startR(SPEED - adjustment)
 
@@ -270,6 +272,7 @@ while time.time() - cur_time < 10 or not TIME_BASED:
         ir_avg = (ir_left + ir_right) / 2.0
 
         if right_dist > DIST_MAX: # Turn right if clear
+            time.sleep(0) # TODO Go a little more forward to center
             stop()
             print("Turning Right")
             turn_degrees_pid(clockwise=True)
@@ -285,7 +288,7 @@ while time.time() - cur_time < 10 or not TIME_BASED:
             log(turned=True, heat_magnitude=ir_avg, magnetic_magnitude=magnet_magnitude)
         else: # Travel one cell forward if clear
             print("Onward")
-            move_one_cell() # TODO Comment this and uncomment bottom two lines if there are issues
+            move_one_cell()
             update_coordinates()
             log(heat_magnitude=ir_avg, magnetic_magnitude=magnet_magnitude)
 
