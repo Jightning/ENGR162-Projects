@@ -98,8 +98,8 @@ def unload():
     cargoMotor.start(50)
     time.sleep(2)
     cargoMotor.stop()
-    startL(50)
-    startR(50)
+    move_one_cell()
+    move_one_cell()
     time.sleep(2)
     stop()
 
